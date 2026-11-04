@@ -1,0 +1,4 @@
+authors "authors.author_id = 1"
+ (author_id,) ->  books.(author_id,)   "books.book_id = 1"
+  ('book_id',)  -> rentals.('book_id',)
+   (reader_id,) -> readers.(reader_id,)

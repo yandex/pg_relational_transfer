@@ -1,0 +1,5 @@
+authors
+ (author_id,) ->  books.(author_id,)
+  (book_id,)  -> rentals.(book_id,)
+   (reader_id,) -> readers.(reader_id,)
+book_series

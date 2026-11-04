@@ -1,0 +1,19 @@
+{
+  "source_rules": [
+    {
+      "table": "authors",
+      "where": "author_id=1"
+    }
+  ],
+  "traversal_rules": [
+    {
+      "type": "limit_distance",
+      "values": [
+        {
+          "table": "authors",
+          "max_distance": 2
+        }
+      ]
+    }
+  ]
+}

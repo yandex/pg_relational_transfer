@@ -8,19 +8,25 @@ class IsolationLevel(enum.StrEnum):
 
 
 class WalkerVersion(enum.StrEnum):
-    TABLE_WALKER = "table_walker"
-    DATA_WALKER_SYNC = "data_walker_sync"
-    DATA_WALKER_ASYNC = "data_walker_async"
+    DATA_GRAPH_WALKER = "data_graph_walker"
+    TABLE_TREE_WALKER = "table_tree_walker"
 
 
 class WriterVersion(enum.StrEnum):
     TO_FILE = "to_file"
-    SINGLE_DATA_VIA_FDW_SYNC = "single_data_via_FDW_sync"
-    BATCH_OF_DATA_VIA_FDW_SYNC = "batch_of_data_via_FDW_sync"
-    VIA_FDW_ASYNC = "via_FDW_async"
+    VIA_FDW_SINGLE = "via_fdw_single"
+    VIA_FDW_BATCH = "via_fdw_batch"
 
 
 class TraversalRuleTypes(enum.StrEnum):
     NO_ENTER = "no_enter"
     NO_EXIT = "no_exit"
     LIMIT_DISTANCE = "limit_distance"
+    ADD_EDGE = "add_edge"
+    ADD_EDGES = "add_edges"
+    ADD_NODE = "add_node"
+
+
+class RuleLoaderTypes(enum.StrEnum):
+    INCLUDING = "including"
+    EXCLUDING = "excluding"

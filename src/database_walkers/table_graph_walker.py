@@ -5,12 +5,15 @@ from logging import getLogger
 import sqlalchemy as sa
 
 from src.common.errors import TableNotFoundError
-from src.graph_rules import GraphRuleManager
-from src.graphs.table_graph import (
+from src.data_structures.table_graph import (
     RelationEdge,
     TableGraph,
     build_table_graph_from_tables,
 )
+from src.database import metadata_utils
+from src.database.connectors.sync_connector import SyncDatabaseConnector
+from src.graph_rules import GraphRuleManager
+from src.utils.database_config import DatabaseConfig
 from src.utils.timer import timer
 
 
@@ -24,16 +27,17 @@ class TableGraphWalker:
 
     def __init__(
         self,
-        source_db_dsn: str,
+        source_db_config: DatabaseConfig,
         graph_rule_manager: GraphRuleManager,
         data_sending_callback: Callable,
-        database_tables: dict[str, sa.Table],
     ):
         self._graph_rule_manager = graph_rule_manager
         self._data_sending_callback = data_sending_callback
-        self._database_tables = database_tables
+        with SyncDatabaseConnector(database_dsn=source_db_config.dsn) as source_database_connector:
+            metadata = metadata_utils.get_reflected_metadata(database_connector=source_database_connector)
+            self._database_tables = metadata_utils.get_tables_from_metadata(metadata=metadata)
 
-    def start_walk(self):
+    async def start_walk(self):
         self._run_deep_search_for_table_graph()
 
     def _get_metadata_tables(self) -> list[sa.Table]:

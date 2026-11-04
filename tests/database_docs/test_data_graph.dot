@@ -1,0 +1,48 @@
+digraph library {
+    rankdir=LR;
+
+    "authors: Джоан Роулинг (id=1)" [shape=box];
+    "authors: Джордж Мартин (id=2)" [shape=box];
+
+    "author_details: британская писательница... (id=1)" [shape=box];
+    "author_details: американский писатель... (id=2)" [shape=box];
+
+    "book_series: Гарри Поттер (id=1)" [shape=box];
+    "book_series: Песнь Льда и Огня (id=2)" [shape=box];
+
+    "books: Гарри Поттер и философский камень (id=1)" [shape=box];
+    "books: Гарри Поттер и Тайная комната (id=2)" [shape=box];
+    "books: Игра престолов (id=3)" [shape=box];
+    "books: Битва королей (id=4)" [shape=box];
+
+    "readers: Иван Иванов (id=1)" [shape=box];
+    "readers: Мария Петрова (id=2)" [shape=box];
+
+    "rentals: [2021-01-15, 2021-02-10] (book_id=1, reader_id=1)" [shape=box];
+    "rentals: [2021-02-15, 2021-03-10] (book_id=2, reader_id=1)" [shape=box];
+    "rentals: [2021-01-20, 2021-02-20] (book_id=3, reader_id=2)" [shape=box];
+    "rentals: [2021-03-01, 2021-04-01] (book_id=4, reader_id=2)" [shape=box];
+
+    "authors: Джоан Роулинг (id=1)" -> "author_details: британская писательница... (id=1)";
+    "authors: Джордж Мартин (id=2)" -> "author_details: американский писатель... (id=2)";
+
+    "authors: Джоан Роулинг (id=1)" -> "books: Гарри Поттер и философский камень (id=1)";
+    "authors: Джоан Роулинг (id=1)" -> "books: Гарри Поттер и Тайная комната (id=2)";
+    "authors: Джордж Мартин (id=2)" -> "books: Игра престолов (id=3)";
+    "authors: Джордж Мартин (id=2)" -> "books: Битва королей (id=4)";
+
+    "books: Гарри Поттер и философский камень (id=1)" -> "book_series: Гарри Поттер (id=1)";
+    "books: Гарри Поттер и Тайная комната (id=2)" -> "book_series: Гарри Поттер (id=1)";
+    "books: Игра престолов (id=3)" -> "book_series: Песнь Льда и Огня (id=2)";
+    "books: Битва королей (id=4)" -> "book_series: Песнь Льда и Огня (id=2)";
+
+    "readers: Иван Иванов (id=1)" -> "rentals: [2021-01-15, 2021-02-10] (book_id=1, reader_id=1)";
+    "readers: Иван Иванов (id=1)" -> "rentals: [2021-02-15, 2021-03-10] (book_id=2, reader_id=1)";
+    "readers: Мария Петрова (id=2)" -> "rentals: [2021-01-20, 2021-02-20] (book_id=3, reader_id=2)";
+    "readers: Мария Петрова (id=2)" -> "rentals: [2021-03-01, 2021-04-01] (book_id=4, reader_id=2)";
+
+    "books: Гарри Поттер и философский камень (id=1)" -> "rentals: [2021-01-15, 2021-02-10] (book_id=1, reader_id=1)";
+    "books: Гарри Поттер и Тайная комната (id=2)" -> "rentals: [2021-02-15, 2021-03-10] (book_id=2, reader_id=1)";
+    "books: Игра престолов (id=3)" -> "rentals: [2021-01-20, 2021-02-20] (book_id=3, reader_id=2)";
+    "books: Битва королей (id=4)" -> "rentals: [2021-03-01, 2021-04-01] (book_id=4, reader_id=2)";
+}

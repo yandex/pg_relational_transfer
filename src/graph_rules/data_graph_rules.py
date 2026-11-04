@@ -1,5 +1,5 @@
-from src.graphs.data_node import DataNode
-from src.graphs.table_graph import RelationEdge
+from src.data_structures.data_node import DataNode
+from src.data_structures.table_graph import RelationEdge
 
 
 class DataGraphRule:

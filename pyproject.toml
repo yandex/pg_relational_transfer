@@ -9,6 +9,98 @@ dependencies = [
     "click>=8.2.1",
     "deepmerge>=2.0",
     "psycopg2-binary>=2.9.10",
+    "pydantic>=2.11.7",
     "python-dotenv>=1.1.0",
-    "sqlalchemy>=2.0.41",
+    "sqlalchemy>=2.0.41,<2.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.11",
+    "sqlalchemy-utils>=0.41",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    # List of all codes
+    # https://docs.astral.sh/ruff/rules/
+    "E",     # pycodestyle (check code against PEP 8 style conventions)
+    "W",     # pycodestyle (check code against PEP 8 style conventions)
+    "F",     # pyflakes (force best practice and check code against errors)
+    "PL",    # pylint (force best practice and check code against errors)
+    "FURB",  # refurb (force best practice)
+    "RUF",   # ruff (force best practice)
+    "C90",   # mccabe (check code against complexity)
+    "FLY",   # flynt (convert old formatted strings to f-strings)
+    "ERA",   # eradicate (remove commented code)
+    "T20",   # flake8-print (remove print statements)
+    "UP",    # pyupgrade (upgrade syntax for newer versions of the language)
+    "N",     # pep8-naming (check code against PEP 8 naming conventions)
+    "I",     # isort (sort imports alphabetically and automatically separate into sections)
+    "B",     # flake8-bugbear (finding likely bugs and design problems in your program)
+    "SIM",   # flake8-simplify (checks for code that can be simplified)
+    "G",     # flake8-logging-format (check logging format)
+]
+extend-ignore = [
+    "PLW0603",   # Using the global statement to update
+    "N818",      # Exception name should be named with an Error suffix
+    "ERA001",    # Found commented-out code
+    "RUF001",    # String contains ambiguous `У` (CYRILLIC CAPITAL LETTER U). Did you mean `Y` (LATIN CAPITAL LETTER Y)?
+    "RUF002",    # Docstring contains ambiguous `о` (CYRILLIC SMALL LETTER O). Did you mean `o` (LATIN SMALL LETTER O)?
+    "RUF003",    # Comment contains ambiguous `Р` (CYRILLIC CAPITAL LETTER ER). Did you mean `P` (LATIN CAPITAL LETTER P)?
+    "RUF012",    # Mutable class attributes should be annotated with `typing.ClassVar`
+    "RUF015",    # Prefer `next(iter(settings.TEACHER_COURSE_MASK_PROMOCODE))` over single element slice
+    "PLR0913",   # Too many arguments in function definition
+    "C901",      # Function is too complex
+    "B008",      # Do not perform function call in argument defaults
+]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+force-wrap-aliases = true
+combine-as-imports = true
+split-on-trailing-comma = true
+lines-after-imports = 2
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

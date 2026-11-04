@@ -1,8 +1,10 @@
 from typing import Protocol
 
+from src.utils.database_config import DatabaseConfig
+
 
 class DataWriterProtocol(Protocol):
-    def __init__(self, source_db_dsn: str, target_db_dsn: str): ...
+    def __init__(self, source_db_config: DatabaseConfig, target_db_config: DatabaseConfig): ...
 
     def write_data(self, *args, **kwargs): ...
 

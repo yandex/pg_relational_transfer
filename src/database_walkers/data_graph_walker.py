@@ -2,51 +2,46 @@ import asyncio
 from collections.abc import Callable
 from logging import getLogger
 
-import sqlalchemy as sa
-
 from src.common.enums import IsolationLevel
-from src.database.connectors import AsyncDatabaseConnector
-from src.database.connectors.sync_connector import SyncDatabaseConnector
-from src.database.metadata_utils import get_reflected_metadata
-from src.graph_rules import GraphRuleManager
-from src.graphs.data_node import DataNode
-from src.graphs.table_graph import (
+from src.data_structures.data_node import DataNode
+from src.data_structures.table_graph import (
     RelationEdge,
     TableGraph,
     build_table_graph_from_tables,
 )
+from src.database import metadata_utils
+from src.database.connectors import AsyncDatabaseConnector
+from src.database.connectors.sync_connector import SyncDatabaseConnector
+from src.graph_rules import GraphRuleManager
 from src.node_keepers.node_keeper import NodeIdKeeper
 from src.node_keepers.node_queue import NodeQueue
+from src.utils.database_config import DatabaseConfig
 from src.utils.timer import timer
 
 
-logger = getLogger("ASYNC_DATA_GRAPH_WALKER")
+logger = getLogger("DATA_GRAPH_WALKER")
 
 
-class AsyncDataGraphWalker:
-    """Like SyncDataWalker but asynchronous"""
+class DataGraphWalker:
+    """The algorithm runs the BFS through the data graph, starting from the initial data"""
 
     def __init__(
         self,
-        source_db_dsn: str,
+        source_db_config: DatabaseConfig,
         graph_rule_manager: GraphRuleManager,
         data_sending_callback: Callable,
-        database_tables: dict[str, sa.Table],
     ):
-        self.database_connector = AsyncDatabaseConnector(database_dsn=source_db_dsn)
+        self.database_connector = AsyncDatabaseConnector(database_dsn=source_db_config.dsn)
 
         self._graph_rule_manager = graph_rule_manager
         self._data_sending_callback = data_sending_callback
-        self._database_tables = database_tables
-        self._event_loop = None
 
-        with SyncDatabaseConnector(database_dsn=source_db_dsn) as sync_database_connector:
-            self._metadata = get_reflected_metadata(database_connector=sync_database_connector)
+        with SyncDatabaseConnector(database_dsn=source_db_config.dsn) as sync_database_connector:
+            metadata = metadata_utils.get_reflected_metadata(database_connector=sync_database_connector)
+            self._database_tables = metadata_utils.get_tables_from_metadata(metadata)
 
-    def start_walk(self):
-        self._event_loop = asyncio.new_event_loop()
-        self._event_loop.run_until_complete(self._run_bfs_for_data_graph())
-        self._event_loop.close()
+    async def start_walk(self):
+        await self._run_bfs_for_data_graph()
 
     async def _find_start_nodes(self) -> list[DataNode]:
         start_nodes: list[DataNode] = []
@@ -81,7 +76,7 @@ class AsyncDataGraphWalker:
                 select_next_ctid_query = self._graph_rule_manager.data_graph_rules.enrich_query(
                     query=select_next_ctid_query,
                     node=cur_node,
-                    edge=ref_node,
+                    edge=_ref_node,
                 )
 
                 next_ids = await self.database_connector.execute(connection=conn, query=select_next_ctid_query)
@@ -118,7 +113,7 @@ class AsyncDataGraphWalker:
             cur_node: DataNode = node_queue.popleft()
             logger.debug("current node: %s", cur_node)
             logger.debug("push for copy...")
-            self._data_sending_callback(node=cur_node, source_metadata=self._metadata)
+            self._data_sending_callback(node=cur_node)
             logger.debug("find next nodes...")
             for next_node in await self._find_next_nodes(cur_node=cur_node, graph_of_tables=graph_of_tables):
                 logger.debug("next node: %s", next_node)
@@ -128,3 +123,4 @@ class AsyncDataGraphWalker:
                     node_queue.append(next_node)
             logger.debug("end of the iteration\nnodes_visited: %s\nnode_queue: %s", nodes_visited, node_queue)
         logger.debug("end of the main loop")
+        await self.database_connector.close()

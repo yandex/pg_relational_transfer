@@ -37,12 +37,8 @@ class RuleLoader:
         TraversalRuleTypes.NO_EXIT: NoExitDataGraphRule,
     }
 
-    @classmethod
-    def load_rules(cls, rules_path: str) -> GraphRuleManager:
-        logger.debug("rules path: %s", rules_path)
-        with open(rules_path) as f:
-            rules = json.load(f)
-        source_rules = rules.get("source_rules")
+    @staticmethod
+    def _load_source_rules(source_rules: list) -> SourceGraphRules:
         if not isinstance(source_rules, list):
             raise ValueError(
                 "Invalid source rules: %s. Format of source rules must be: '[rule1, rule2, ...]'", source_rules
@@ -57,13 +53,14 @@ class RuleLoader:
                 )
             table_name = rule["table"]
             if table_name in source_rule_tables:
-                raise ValueError(
-                    f"Tables in source rules should be unique. Found duplicate: {table_name}"
-                )
+                raise ValueError(f"Tables in source rules should be unique. Found duplicate: {table_name}")
             source_rule_tables.add(table_name)
         logger.debug("result source_rules: %s", source_rules)
 
-        traversal_rules = rules.get("traversal_rules")
+        return SourceGraphRules(rules=source_rules)
+
+    @staticmethod
+    def _load_traversal_rules(traversal_rules: list) -> tuple[TableGraphRules, DataGraphRules]:
         if not isinstance(traversal_rules, list):
             raise ValueError(
                 "Invalid traversal rules: %s. Format of source rules must be: '[rule1, rule2, ...]'", traversal_rules
@@ -106,9 +103,16 @@ class RuleLoader:
         logger.debug("result table_graph_rules: %s", table_graph_rules)
         logger.debug("result data_graph_rules: %s", data_graph_rules)
 
-        source_rules = SourceGraphRules(rules=source_rules)
-        table_graph_rules = TableGraphRules(rules=table_graph_rules)
-        data_graph_rules = DataGraphRules(rules=data_graph_rules)
+        return TableGraphRules(rules=table_graph_rules), DataGraphRules(rules=data_graph_rules)
+
+    @classmethod
+    def load_rules(cls, rules_path: str) -> GraphRuleManager:
+        logger.debug("rules path: %s", rules_path)
+        with open(rules_path) as f:
+            rules = json.load(f)
+
+        source_rules = cls._load_source_rules(rules.get("source_rules"))
+        table_graph_rules, data_graph_rules = cls._load_traversal_rules(rules.get("traversal_rules"))
 
         return GraphRuleManager(
             source_rules=source_rules, table_graph_rules=table_graph_rules, data_graph_rules=data_graph_rules

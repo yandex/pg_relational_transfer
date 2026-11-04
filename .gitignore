@@ -36,6 +36,8 @@ nosetests.xml
 coverage.xml
 *.cover
 .hypothesis/
+.pytest_cache/
+.ruff_cache/
 
 # Flask stuff:
 instance/

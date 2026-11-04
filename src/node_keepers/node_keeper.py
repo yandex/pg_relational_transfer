@@ -1,7 +1,7 @@
 from collections import defaultdict
 from collections.abc import Iterable
 
-from src.graphs.data_node import DataNode
+from src.data_structures.data_node import DataNode
 
 
 class NodeIdKeeper:
