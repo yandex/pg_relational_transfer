@@ -1,7 +1,7 @@
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 import sqlalchemy as sa
 
@@ -13,7 +13,7 @@ Tfield = TypeVar("Tfield")
 
 
 @dataclass(frozen=True)
-class RelationEdge(Generic[Ttable, Tfield]):
+class RelationEdge[Ttable, Tfield]:
     source_table: Ttable
     target_table: Ttable
     source_key: tuple[Tfield, ...]
@@ -23,7 +23,7 @@ class RelationEdge(Generic[Ttable, Tfield]):
         return f"{self.source_table}.{self.source_key} -> {self.target_table}.{self.target_key}"
 
 
-class TableGraph(Generic[Ttable]):
+class TableGraph[Ttable]:
     """
     Graph of tables (data links)
     'graph[table] = {edge1, edge2, ...}' means that the table (node) has incident relations (edges) edge1, edge2, ...
@@ -85,10 +85,10 @@ class TableGraph(Generic[Ttable]):
         )
 
 
-def build_table_graph_from_tables(
+def build_table_graph_from_tables[Ttable](
     *, database_tables: dict[str, sa.Table], extract_table_function: Callable[[sa.Table], Ttable]
-) -> TableGraph:
-    graph = TableGraph()
+) -> TableGraph[Ttable]:
+    graph = TableGraph[Ttable]()
 
     for table in database_tables.values():
         for constraint in table.foreign_key_constraints:

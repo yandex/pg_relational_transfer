@@ -1,39 +1,26 @@
-from dataclasses import dataclass
 from io import TextIOWrapper
 
 import sqlalchemy as sa
 
-from src.config import settings
+from src.data_structures.table_graph import (
+    TableGraph,
+    build_table_graph_from_tables,
+)
 from src.database.connectors import SyncDatabaseConnector
 from src.database.metadata_utils import (
     get_reflected_metadata,
     get_tables_from_metadata,
 )
-from src.graph_walkers import TableGraphWalker
-from src.graphs.table_graph import (
-    TableGraph,
-    build_table_graph_from_tables,
-)
-
-
-@dataclass
-class Sequence:
-    name: str
-    start_val: int
-    min_val: int
-    max_val: int
-    increment_by: int
-    last_val: int | None
-    table_name: str | None = None
-    column_name: str | None = None
+from src.database_walkers import TableGraphWalker
+from src.utils.database_config import DatabaseConfig
 
 
 class SchemaManager:
     """Manages database schema"""
 
     @classmethod
-    def print_schema(cls, *, db: str, source_tables: list[str], output: TextIOWrapper) -> None:
-        database_connector = SyncDatabaseConnector(database_dsn=db)
+    def print_schema(cls, *, db_config: DatabaseConfig, source_tables: list[str], output: TextIOWrapper) -> None:
+        database_connector = SyncDatabaseConnector(database_dsn=db_config.dsn)
         with database_connector:
             metadata = get_reflected_metadata(database_connector=database_connector)
         tables: dict[str, sa.Table] = get_tables_from_metadata(metadata=metadata)
@@ -57,68 +44,168 @@ class SchemaManager:
         output.write("@enduml\n")
 
     @classmethod
-    def clone_schema(cls, *, source_db: str, target_db: str):
-        source_connector = SyncDatabaseConnector(database_dsn=source_db)
-        target_connector = SyncDatabaseConnector(database_dsn=target_db)
+    def clone_schema(
+        cls,
+        *,
+        source_db_config: DatabaseConfig,
+        target_db_config: DatabaseConfig,
+        schema_name: str,
+        include_extensions=True,
+        exclude_constraints=True,
+        exclude_indexes=True,
+        sync_sequences=True,
+    ):
+        """
+        Clone a database schema from source to target database.
+
+        This class method creates a copy of a specified schema from the source database to the target database,
+        with options to control various aspects of the cloning process.
+
+        Args:
+            source_db_config (DatabaseConfig): DSN of the source database.
+            target_db_config (DatabaseConfig): DSN of the target database.
+            schema_name (str): Name of the schema to clone.
+            include_extensions (bool, optional): Whether to include extensions in the clone. Defaults to True.
+            exclude_constraints (bool, optional): Whether to exclude constraints from the clone. Defaults to True.
+            exclude_indexes (bool, optional): Whether to exclude indexes from the clone. Defaults to True.
+            sync_sequences (bool, optional): Whether to synchronize sequences between databases. Defaults to True.
+        """
+        source_connector = SyncDatabaseConnector(database_dsn=source_db_config.dsn)
+        target_connector = SyncDatabaseConnector(database_dsn=target_db_config.dsn)
 
         with source_connector, target_connector:
-            cls._clone_user_types(source_connector=source_connector, target_connector=target_connector)
-            cls._clone_extensions(source_connector=source_connector, target_connector=target_connector)
-            cls._clone_sequences(source_connector=source_connector, target_connector=target_connector)
-            cls._clone_schema_of_tables(source_connector=source_connector, target_connector=target_connector)
+            if include_extensions:
+                cls._clone_extensions(source_connector=source_connector, target_connector=target_connector)
+            metadata = get_reflected_metadata(database_connector=source_connector)
+            if exclude_constraints:
+                cls._exclude_constraints(metadata=metadata)
+            if exclude_indexes:
+                cls._exclude_indexes(metadata=metadata)
+            if sync_sequences:
+                cls._sync_sequences(metadata=metadata, source_connector=source_connector, schema_name=schema_name)
+            metadata.create_all(bind=target_connector.connection)
 
     @classmethod
-    def recreate_schema(cls, db: str, schema: str) -> None:
-        database_connector = SyncDatabaseConnector(database_dsn=db)
+    def recreate_schema(cls, db_config: DatabaseConfig, schema: str) -> None:
+        database_connector = SyncDatabaseConnector(database_dsn=db_config.dsn)
         with database_connector as connector:
             connector.execute(f"DROP SCHEMA {schema} CASCADE")
             connector.execute(f"CREATE SCHEMA {schema}")
 
     @classmethod
-    def _clone_user_types(
-        cls, *, source_connector: SyncDatabaseConnector, target_connector: SyncDatabaseConnector
+    def _sync_sequences(
+        cls, *, metadata: sa.MetaData, source_connector: SyncDatabaseConnector, schema_name: str
     ) -> None:
         """
-        Clone data types (from pg_type) with following values (all conditions must be met):
-         - type (typtype column) are equal to one of: domain (d), enum type (e);
-         - namespace is not equal to: pg_catalog, information_schema.
-        (see https://www.postgresql.org/docs/current/catalog-pg-type.html)
-        """
-        select_query = f"""
-        SELECT n.nspname AS schema_name,
-               t.typname AS type_name,
-               t.typtype,
-               CASE WHEN t.typtype = 'd' THEN
-                   pg_catalog.format_type(t.typbasetype, NULL)
-               ELSE NULL END AS data_type,
-               CASE WHEN t.typtype = 'e' THEN
-                   string_agg('''' || e.enumlabel || '''', ', ')
-               ELSE NULL END AS enum_labels,
-               CASE WHEN t.typtype = 'd' THEN
-                   pg_get_constraintdef(c.oid)
-               ELSE NULL END AS constraint_defs
-        FROM pg_type t
-        LEFT JOIN pg_namespace n ON n.oid = t.typnamespace
-        LEFT JOIN pg_enum e ON t.oid = e.enumtypid
-        LEFT JOIN pg_constraint c ON t.oid = c.contypid
-        WHERE n.nspname NOT IN ({settings.EXCLUDED_SCHEMAS})
-        AND t.typtype IN ('d', 'e')
-        GROUP BY n.nspname, t.typname, t.typtype, t.typbasetype, c.oid
-        """
-        user_types = source_connector.execute(query=select_query).fetchall()
+        This class method retrieves sequence information from the source database and updates the corresponding
+        sequences in the database's metadata. It handles both standalone sequences and sequences associated
+        with identity columns.
 
-        for schema_name, type_name, type_kind, data_type, enum_labels, constraint_defs in user_types:
-            if type_kind == "d":  # domains
-                create_domain_query = f"CREATE DOMAIN {schema_name}.{type_name} AS {data_type}"
-                if constraint_defs:
-                    create_domain_query += f" {constraint_defs}"
-                target_connector.execute(query=create_domain_query)
-            elif type_kind == "e":  # enumerations
-                if enum_labels:
-                    create_enum_query = f"CREATE TYPE {schema_name}.{type_name} AS ENUM ({enum_labels})"
-                    target_connector.execute(query=create_enum_query)
-            else:
-                raise ValueError(f"Unknown type kind: {type_kind}")
+        Args:
+            metadata: SQLAlchemy metadata object representing the database schema.
+            source_connector: Database connector for the source database.
+            schema_name: Name of the schema containing the sequences to synchronize.
+        """
+        postgres_type_map = {
+            "int8": sa.BIGINT,
+            "bigint": sa.BIGINT,
+            "int4": sa.INTEGER,
+            "integer": sa.INTEGER,
+            "int2": sa.SMALLINT,
+            "smallint": sa.SMALLINT,
+        }
+        select_sequences_query = f"""
+            SELECT
+                sequencename, last_value, increment_by, start_value, min_value, max_value, cycle, data_type
+            FROM pg_sequences
+            WHERE schemaname = '{schema_name}'
+        """
+        db_sequences_map = {
+            row.sequencename: row for row in source_connector.execute(select_sequences_query).mappings()
+        }
+        select_sequence_name_query = "SELECT pg_get_serial_sequence(:table, :column)"
+
+        identity_names_set = set()
+        for table in metadata.tables.values():
+            for column in table.c:
+                if column.identity:
+                    identity_name = (
+                        source_connector.execute(
+                            select_sequence_name_query, {"table": table.name, "column": column.name}
+                        )
+                        .scalar_one()
+                        .split(".")[-1]
+                    )
+                    sequence = db_sequences_map[identity_name]
+                    column.identity.start = (
+                        sequence.last_value + sequence.increment_by
+                        if sequence.last_value is not None
+                        else sequence.start_value
+                    )
+                    identity_names_set.add(identity_name)
+                elif (
+                    column.server_default is not None
+                    and hasattr(column.server_default, "arg")
+                    and "nextval" in str(column.server_default.arg)
+                ):
+                    # this may not work well if the table contains two or more auto-increment columns
+                    # without identification, because sqlalchemy accepts a single auto-increment field.
+                    column.autoincrement = False
+
+        for sequence_name, sequence_details in db_sequences_map.items():
+            if sequence_name not in identity_names_set:
+                sa.Sequence(
+                    name=sequence_details.sequencename,
+                    start=sequence_details.last_value + sequence_details.increment_by
+                    if sequence_details.last_value is not None
+                    else sequence_details.start_value,
+                    increment=sequence_details.increment_by,
+                    minvalue=sequence_details.min_value,
+                    maxvalue=sequence_details.max_value,
+                    cycle=sequence_details.cycle,
+                    data_type=postgres_type_map[sequence_details.data_type],
+                    metadata=metadata,
+                )
+
+    @classmethod
+    def _exclude_constraints(
+        cls,
+        *,
+        metadata: sa.MetaData,
+        exclude_primary_key_constraint=False,
+        exclude_foreign_key_constraint=True,
+        exclude_unique_constraint=True,
+        exclude_check_constraint=True,
+    ):
+        """
+        Class method to remove specific constraints from all tables in the provided SQLAlchemy metadata.
+
+        Iterates through each table in the metadata and removes constraints based on the provided flags.
+        Supported constraint types include primary key, foreign key, unique, and check constraints.
+
+        Args:
+            metadata (sa.MetaData): The SQLAlchemy metadata object containing the database schema.
+            exclude_primary_key_constraint (bool, optional): If True, primary key constraints are removed.
+                Defaults to False.
+            exclude_foreign_key_constraint (bool, optional): If True, foreign key constraints are removed.
+                Defaults to True.
+            exclude_unique_constraint (bool, optional): If True, unique constraints are removed. Defaults to True.
+            exclude_check_constraint (bool, optional): If True, check constraints are removed. Defaults to True.
+        """
+        for table in metadata.tables.values():
+            for constraint in table.constraints.copy():
+                if (
+                    (isinstance(constraint, sa.PrimaryKeyConstraint) and exclude_primary_key_constraint)
+                    or (isinstance(constraint, sa.ForeignKeyConstraint) and exclude_foreign_key_constraint)
+                    or (isinstance(constraint, sa.UniqueConstraint) and exclude_unique_constraint)
+                    or (isinstance(constraint, sa.CheckConstraint) and exclude_check_constraint)
+                ):
+                    table.constraints.remove(constraint)
+
+    @classmethod
+    def _exclude_indexes(cls, *, metadata: sa.MetaData):
+        for table in metadata.tables.values():
+            table.indexes.clear()
 
     @classmethod
     def _clone_extensions(
@@ -126,77 +213,10 @@ class SchemaManager:
     ) -> None:
         """Clone all extensions"""
         select_extensions_query = "SELECT extname FROM pg_extension"
-        extensions = source_connector.execute(query=select_extensions_query).fetchall()
+        extensions = source_connector.execute(query=select_extensions_query).scalars().all()
         for extension in extensions:
-            create_extension_query = f"CREATE EXTENSION IF NOT EXISTS {extension[0]}"
+            create_extension_query = f'CREATE EXTENSION IF NOT EXISTS "{extension}"'
             target_connector.execute(query=create_extension_query)
-
-    @classmethod
-    def _clone_schema_of_tables(
-        cls, *, source_connector: SyncDatabaseConnector, target_connector: SyncDatabaseConnector
-    ) -> None:
-        """Clone schema of tables without non-identity sequences and non-pk constraints"""
-        metadata = get_reflected_metadata(database_connector=source_connector)
-
-        for table in metadata.tables.values():
-            # delete non-pk constraints from metadata:
-            table.constraints.clear()
-            table.indexes.clear()
-            table.foreign_keys.clear()
-            table.foreign_key_constraints.clear()
-            # delete non-identity sequences from metadata
-            if table.autoincrement_column is not None and not table.autoincrement_column.server_default.is_identity:
-                table.primary_key._autoincrement_column = None
-                for column in table.columns:
-                    column.autoincrement = False
-                    column.server_default = None
-
-        metadata.create_all(bind=target_connector.connection)
-
-    @classmethod
-    def _clone_sequences(
-        cls, *, source_connector: SyncDatabaseConnector, target_connector: SyncDatabaseConnector
-    ) -> None:
-        """Clone all sequences"""
-
-        # get sequences information
-        select_sequences_query = (
-            "SELECT sequencename, start_value, min_value, max_value, increment_by, last_value FROM pg_sequences"
-        )
-        sequences_data: sa.Sequence[sa.Row] = source_connector.execute(query=select_sequences_query).fetchall()
-        sequences: dict[str, Sequence] = {seq_data[0]: Sequence(*seq_data) for seq_data in sequences_data}
-        select_seq_table_col_query = """
-        SELECT s.relname, t.relname, a.attname
-        FROM pg_class s
-            JOIN pg_depend d ON d.objid=s.oid AND d.classid='pg_class'::regclass AND d.refclassid='pg_class'::regclass
-            JOIN pg_class t ON t.oid=d.refobjid
-            JOIN pg_namespace n ON n.oid=t.relnamespace
-            JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=d.refobjsubid
-            WHERE s.relkind='S' and d.deptype='a'
-        """
-        seq_table_col_data: sa.Sequence[sa.Row] | None = source_connector.execute(
-            query=select_seq_table_col_query
-        ).fetchall()
-
-        for seq_name, table_name, column_name in seq_table_col_data:
-            sequences[seq_name].table_name = table_name
-            sequences[seq_name].column_name = column_name
-
-        # paste sequences to new db
-        for sequence in sequences.values():
-            create_sequence_query = f"""
-                CREATE SEQUENCE IF NOT EXISTS {sequence.name}
-                INCREMENT BY {sequence.increment_by}
-                MINVALUE {sequence.min_val} MAXVALUE {sequence.max_val}
-                START WITH {sequence.start_val}
-                OWNED BY {sequence.table_name + "." + sequence.column_name if sequence.table_name else "NONE"};
-            """
-            target_connector.execute(query=create_sequence_query)
-            if sequence.last_val:
-                setval_query = f"SELECT setval('{sequence.name}', {sequence.last_val})"
-                target_connector.execute(query=setval_query)
-
-    CONSTRAINT_TYPES = {sa.PrimaryKeyConstraint: "PRIMARY KEY", sa.UniqueConstraint: ""}
 
     @classmethod
     def _clone_constraints(

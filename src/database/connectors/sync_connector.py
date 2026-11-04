@@ -18,9 +18,10 @@ class SyncDatabaseConnector:
         self.connection = None
 
     def begin(self) -> None:
-        self.engine = sa.create_engine(self.database_dsn)
+        self.engine = sa.create_engine(self.database_dsn, poolclass=sa.pool.NullPool)
         self.connection = self.engine.connect()
         self.connection.begin()
+        stream_logger.debug("Start connection")
 
     def commit(self) -> None:
         self.connection.commit()
@@ -30,15 +31,15 @@ class SyncDatabaseConnector:
 
     def close(self) -> None:
         self.connection.close()
+        stream_logger.debug("Close connection")
 
-    def execute(self, query: str | sa.sql.expression.ClauseElement) -> Any:
-        if isinstance(query, sa.sql.expression.ClauseElement):
-            query = str(query.compile())
-        query_strip = query.strip()
-        stream_logger.debug(query_strip)
-        sql_queries_logger.info("%s\n", query_strip)
+    def execute(self, query: str | sa.sql.expression.ClauseElement, parameters: dict | None = None) -> Any:
+        if isinstance(query, str):
+            query = sa.text(query)
+        stream_logger.debug("%s", str(query).strip())
+        sql_queries_logger.info("%s\n", str(query).strip())
         with retry(exceptions=OperationalError):
-            return self.connection.execute(sa.text(query))
+            return self.connection.execute(query, parameters=parameters)
 
     def __enter__(self):
         self.begin()

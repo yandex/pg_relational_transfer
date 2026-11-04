@@ -1,0 +1,9 @@
+{
+  "source_rules": [
+    {
+      "table": "authors",
+      "where": "author_id=1"
+    }
+  ],
+  "traversal_rules": []
+}

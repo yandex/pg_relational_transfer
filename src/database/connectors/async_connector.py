@@ -27,6 +27,7 @@ class AsyncDatabaseConnector:
             pool_size=settings.CONNECTION_POOL_SIZE, db_url=self.database_dsn
         )
         await self.connection_pool.start_all(isolation_level, readonly=readonly)
+        stream_logger.debug("Start connections")
 
     async def connect(self) -> AsyncConnectionWrapper:
         return await self.connection_pool.connect()
@@ -39,11 +40,11 @@ class AsyncDatabaseConnector:
 
     async def close(self) -> None:
         await self.connection_pool.close_all()
+        stream_logger.debug("Close connections")
 
     @staticmethod
-    async def execute(connection: asyncpg.Connection, query: str) -> Any:
-        query_strip = query.strip()
-        stream_logger.debug(query_strip)
-        sql_queries_logger.info("%s\n", query_strip)
+    async def execute(connection: asyncpg.Connection, query: str, *args) -> Any:
+        stream_logger.debug("%s, query arguments: %s", query.strip(), args)
+        sql_queries_logger.info("%s, query arguments: %s\n", query.strip(), args)
         async with retry(exceptions=asyncpg.exceptions.PostgresConnectionError):
-            return await connection.fetch(query)
+            return await connection.fetch(query, *args)

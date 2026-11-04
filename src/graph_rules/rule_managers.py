@@ -1,22 +1,16 @@
+from copy import deepcopy
 from dataclasses import dataclass
 
 from src.common.enums import TraversalRuleTypes
+from src.data_structures.data_node import DataNode
+from src.data_structures.table_graph import RelationEdge, TableGraph
 from src.graph_rules.data_graph_rules import DataGraphRule
 from src.graph_rules.table_graph_rules import TableGraphRule
-from src.graphs.data_node import DataNode
-from src.graphs.table_graph import RelationEdge, TableGraph
-
-
-@dataclass
-class GraphRuleManager:
-    source_rules: "SourceGraphRules"
-    table_graph_rules: "TableGraphRules"
-    data_graph_rules: "DataGraphRules"
 
 
 class SourceGraphRules:
     """
-    Static data of the SOURCE RULES rules.
+    Static data of the SOURCE RULES.
     They mean the data (tables) from which the walkers algorithms need to be run.
     """
 
@@ -51,12 +45,21 @@ class TableGraphRules:
     They change the structure of the graph that walker traverses.
     """
 
-    def __init__(self, rules: list[TableGraphRule]):
-        self._rules = rules
+    def __init__(self, rules: list[TableGraphRule] | None = None):
+        self._rules = rules or []
 
-    def update_graph(self, graph: TableGraph) -> TableGraph:
+    def update_graph(self, initial_graph: TableGraph) -> TableGraph:
+        graph = deepcopy(initial_graph)
         for rule in self._rules:
-            graph = rule.update_graph(graph)
+            graph = rule.update_graph(graph, initial_graph)
+        return graph
+
+
+class IncludingTableGraphRules(TableGraphRules):
+    def update_graph(self, initial_graph: TableGraph) -> TableGraph:
+        graph = TableGraph()
+        for rule in self._rules:
+            graph = rule.update_graph(graph, initial_graph)
         return graph
 
 
@@ -67,8 +70,8 @@ class DataGraphRules:
     They filter the nodes that walker traverses.
     """
 
-    def __init__(self, rules: dict[str, dict[TraversalRuleTypes, list[DataGraphRule]]]):
-        self._rules = rules
+    def __init__(self, rules: dict[str, dict[TraversalRuleTypes, list[DataGraphRule]]] | None = None):
+        self._rules = rules or {}
 
     def enrich_query(self, query: str, node: DataNode, edge: RelationEdge) -> str:
         if edge.target_table in self._rules and TraversalRuleTypes.NO_ENTER in self._rules[edge.target_table]:
@@ -80,3 +83,10 @@ class DataGraphRules:
                 query = rule.enrich_query(query=query, node=node, edge=edge)
 
         return query
+
+
+@dataclass
+class GraphRuleManager:
+    source_rules: SourceGraphRules
+    table_graph_rules: TableGraphRules | IncludingTableGraphRules
+    data_graph_rules: DataGraphRules

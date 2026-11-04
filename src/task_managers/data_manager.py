@@ -1,26 +1,18 @@
 from logging import getLogger
 
-import sqlalchemy as sa
-
 from src.common.enums import WalkerVersion, WriterVersion
 from src.common.errors import TableNotFoundError
-from src.data_writers import (
-    AsyncDataWriterViaFDW,
-    DataWriterProtocol,
-    DataWriterToFile,
-    SyncBatchOfDataWriterViaFDW,
-    SyncSingleDataWriterViaFDW,
-)
 from src.database import metadata_utils
 from src.database.connectors.sync_connector import SyncDatabaseConnector
-from src.database.metadata_utils import get_reflected_metadata
-from src.graph_rules import GraphRuleManager, SourceGraphRules
-from src.graph_walkers import (
-    AsyncDataGraphWalker,
-    GraphWalkerProtocol,
-    SyncDataGraphWalker,
-    TableGraphWalker,
+from src.database_walkers import DataGraphWalker, GraphWalkerProtocol, TableTreeWalker, TreeWalkerProtocol
+from src.database_writers import (
+    BatchOfDataWriterViaFDW,
+    DataWriterProtocol,
+    DataWriterToFile,
+    SingleDataWriterViaFDW,
 )
+from src.graph_rules import GraphRuleManager, RuleLoader, SourceGraphRules, TableTreeLoader
+from src.utils.database_config import DatabaseConfig
 from src.utils.timer import timer
 
 
@@ -30,80 +22,79 @@ logger = getLogger("DATA_MANAGER")
 class DataManager:
     """Manages the data, including running the transfer algorithm"""
 
-    _VERSION_TO_WALKER_MAP: dict[WalkerVersion, type[GraphWalkerProtocol]] = {
-        WalkerVersion.TABLE_WALKER: TableGraphWalker,
-        WalkerVersion.DATA_WALKER_SYNC: SyncDataGraphWalker,
-        WalkerVersion.DATA_WALKER_ASYNC: AsyncDataGraphWalker,
+    _VERSION_TO_WALKER_MAP: dict[WalkerVersion, type[GraphWalkerProtocol | TreeWalkerProtocol]] = {
+        WalkerVersion.DATA_GRAPH_WALKER: DataGraphWalker,
+        WalkerVersion.TABLE_TREE_WALKER: TableTreeWalker,
     }
 
     _VERSION_TO_WRITER_MAP: dict[WriterVersion, type[DataWriterProtocol]] = {
         WriterVersion.TO_FILE: DataWriterToFile,
-        WriterVersion.SINGLE_DATA_VIA_FDW_SYNC: SyncSingleDataWriterViaFDW,
-        WriterVersion.BATCH_OF_DATA_VIA_FDW_SYNC: SyncBatchOfDataWriterViaFDW,
-        WriterVersion.VIA_FDW_ASYNC: AsyncDataWriterViaFDW,
+        WriterVersion.VIA_FDW_SINGLE: SingleDataWriterViaFDW,
+        WriterVersion.VIA_FDW_BATCH: BatchOfDataWriterViaFDW,
     }
 
     _INCOMPATIBLE_WALKER_TO_WRITERS_MAP: dict[WalkerVersion, set[WriterVersion]] = {
-        WalkerVersion.TABLE_WALKER: {
-            WriterVersion.TO_FILE,
-            WriterVersion.SINGLE_DATA_VIA_FDW_SYNC,
-            WriterVersion.VIA_FDW_ASYNC,
-        },
-        WalkerVersion.DATA_WALKER_SYNC: {WriterVersion.BATCH_OF_DATA_VIA_FDW_SYNC},
-        WalkerVersion.DATA_WALKER_ASYNC: {WriterVersion.BATCH_OF_DATA_VIA_FDW_SYNC},
+        WalkerVersion.DATA_GRAPH_WALKER: {WriterVersion.VIA_FDW_BATCH},
+        WalkerVersion.TABLE_TREE_WALKER: {WriterVersion.VIA_FDW_SINGLE},
     }
 
-    @classmethod
-    @timer
-    def start_cloning_data(
-        cls,
-        *,
-        source_db_url: str,
-        target_db_url: str,
-        graph_rule_manager: GraphRuleManager,
+    def __init__(
+        self,
+        source_db_config: DatabaseConfig,
+        target_db_config: DatabaseConfig,
         walker_version: WalkerVersion,
         writer_version: WriterVersion,
+        rule_path: str | None = None,
     ):
-        with SyncDatabaseConnector(database_dsn=source_db_url) as source_database_connector:
+        self.source_db_config = source_db_config
+        self.target_db_config = target_db_config
+
+        self._validate_compatibility_of_walker_and_writer(walker_version=walker_version, writer_version=writer_version)
+
+        self.additional_walker_kwargs = {}
+        if walker_version == WalkerVersion.DATA_GRAPH_WALKER:
+            graph_rule_manager: GraphRuleManager = RuleLoader.load_rules(rules_path=rule_path)
+            self._validate_source_rules(source_rules=graph_rule_manager.source_rules)
+            self.additional_walker_kwargs["graph_rule_manager"] = graph_rule_manager
+        elif walker_version == WalkerVersion.TABLE_TREE_WALKER:
+            table_tree = TableTreeLoader.load_table_tree(filename=rule_path)
+            self.additional_walker_kwargs["table_tree"] = table_tree
+
+        self.walker_class = self._VERSION_TO_WALKER_MAP[walker_version]
+        self.writer_class = self._VERSION_TO_WRITER_MAP[writer_version]
+
+    @timer
+    async def clone_data(self):
+        async with self.writer_class(
+            source_db_config=self.source_db_config,
+            target_db_config=self.target_db_config,
+        ) as writer:
+            walker = self.walker_class(
+                source_db_config=self.source_db_config,
+                data_sending_callback=writer.write_data,
+                **self.additional_walker_kwargs,
+            )
+            await walker.start_walk()
+
+    def _validate_source_rules(self, *, source_rules: SourceGraphRules) -> None:
+        with SyncDatabaseConnector(database_dsn=self.source_db_config.dsn) as source_database_connector:
             metadata = metadata_utils.get_reflected_metadata(database_connector=source_database_connector)
             database_tables = metadata_utils.get_tables_from_metadata(metadata=metadata)
-
-        cls._validate_source_rules(source_rules=graph_rule_manager.source_rules, database_tables=database_tables)
-        cls._validate_compatibility_of_walker_and_writer(walker_version=walker_version, writer_version=writer_version)
-
-        walker_class = cls._VERSION_TO_WALKER_MAP[walker_version]
-        writer_class = cls._VERSION_TO_WRITER_MAP[writer_version]
-
-        with writer_class(
-            source_db_dsn=source_db_url,
-            target_db_dsn=target_db_url,
-        ) as writer:
-            walker = walker_class(
-                source_db_dsn=source_db_url,
-                graph_rule_manager=graph_rule_manager,
-                data_sending_callback=writer.write_data,
-                database_tables=database_tables,
-            )
-            walker.start_walk()
-
-    @classmethod
-    def _validate_source_rules(cls, *, source_rules: SourceGraphRules, database_tables: dict[str, sa.Table]) -> None:
         for table_name in source_rules.tables:
             if table_name not in database_tables:
                 raise TableNotFoundError(table_name)
 
-    @classmethod
     def _validate_compatibility_of_walker_and_writer(
-        cls, *, walker_version: WalkerVersion, writer_version: WriterVersion
+        self, *, walker_version: WalkerVersion, writer_version: WriterVersion
     ) -> None:
-        if writer_version in cls._INCOMPATIBLE_WALKER_TO_WRITERS_MAP[walker_version]:
+        if writer_version in self._INCOMPATIBLE_WALKER_TO_WRITERS_MAP.get(walker_version, {}):
             raise ValueError(f"Incompatible walker version {walker_version} and writer version {writer_version}")
 
     @classmethod
-    def delete_data(cls, *, db_dsn: str) -> None:
-        database_connector = SyncDatabaseConnector(database_dsn=db_dsn)
+    def delete_data(cls, *, db_config: DatabaseConfig) -> None:
+        database_connector = SyncDatabaseConnector(database_dsn=db_config.dsn)
 
         with database_connector:
-            db_metadata = get_reflected_metadata(database_connector=database_connector)
+            db_metadata = metadata_utils.get_reflected_metadata(database_connector=database_connector)
             for table in reversed(db_metadata.sorted_tables):
                 database_connector.execute(table.delete())

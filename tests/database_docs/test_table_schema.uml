@@ -1,0 +1,53 @@
+@startuml
+
+entity "authors" {
+    *author_id : INT
+    --
+    name : VARCHAR
+    birthdate : DATE
+}
+
+entity "book_series" {
+    *series_id : INT
+    --
+    series_name : VARCHAR
+}
+
+entity "books" {
+    *book_id : SERIAL
+    --
+    title : VARCHAR
+    published_date : DATE
+    author_id : INT
+    series_id : INT
+}
+
+entity "readers" {
+    *reader_id : INT
+    --
+    name : VARCHAR
+    membership_date : DATE
+}
+
+entity "rentals" {
+    *book_id : INT
+    *reader_id : INT
+    --
+    rental_daterange : DATERANGE
+    status : ENUM
+}
+
+entity "author_details" {
+    *author_id : INT
+    --
+    biography : TEXT
+}
+
+' Определение Foreign Key связей
+books }o--|| authors
+books }o--|| book_series
+rentals }o--|| books
+rentals }o--|| readers
+author_details ||--|| authors
+
+@enduml
