@@ -52,7 +52,6 @@ instance/
 
 # uv
 .python-version
-uv.lock
 
 # Environments
 .env

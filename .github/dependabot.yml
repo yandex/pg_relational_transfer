@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:00"
+      timezone: "Europe/Moscow"
+    open-pull-requests-limit: 5
+    groups:
+      python-runtime:
+        patterns:
+          - "asyncpg"
+          - "click"
+          - "deepmerge"
+          - "psycopg2-binary"
+          - "pydantic"
+          - "python-dotenv"
+          - "sqlalchemy"
+        update-types: ["minor", "patch"]
+      python-dev:
+        patterns:
+          - "pytest"
+          - "pytest-asyncio"
+          - "ruff"
+          - "sqlalchemy-utils"
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:00"
+      timezone: "Europe/Moscow"
+    open-pull-requests-limit: 5

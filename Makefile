@@ -26,7 +26,7 @@ run:  ##@Application Run application
 	uv run -m src $(args)
 
 install:  ##@Install Install dependencies
-	uv sync --group dev
+	uv sync --locked --group dev
 
 env:  ##@Environment Create .env file with variables
 	@$(eval SHELL:=/bin/bash)
